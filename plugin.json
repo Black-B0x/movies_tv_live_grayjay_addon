@@ -1,11 +1,11 @@
 {
-  "name": "Addon Bridge",
-  "description": "Movies and shows from Stremio-protocol addons. Shows are channels, seasons are playlists.",
+  "name": "Movies TV Live",
+  "description": "Movies and shows from Stremio-protocol addons, plus live TV channels from channel lists you add. Shows and live channels are channels, seasons are playlists.",
   "author": "Black-B0x",
   "authorUrl": "https://github.com/Black-B0x",
-  "repositoryUrl": "https://github.com/Black-B0x/grayjay-addon-bridge",
+  "repositoryUrl": "https://github.com/Black-B0x/movies_tv_live_grayjay_addon",
   "id": "197e322b-ec7f-42f3-a302-dabbcaf75749",
-  "version": 2,
+  "version": 3,
   "addons": [
     {
       "name": "Cinemeta",
@@ -19,5 +19,5 @@
   "extraAllowUrls": [
     "pengu.uk"
   ],
-  "allowAnyHost": false
+  "allowAnyHost": true
 }

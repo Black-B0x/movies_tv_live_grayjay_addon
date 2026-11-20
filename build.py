@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build, sign and serve the Addon Bridge Grayjay plugin.
+"""Build, sign and serve the Movies TV Live Grayjay plugin.
 
   python build.py                 build docs/ for publishing (e.g. on GitHub Pages)
   python build.py --bump          increment the version, then build
@@ -94,8 +94,10 @@ def probe_addon(addon):
 def make_settings(addons):
     s = [{"variable": "homeHeader", "name": "Home", "description": "", "type": "Header"},
          {"variable": "homeContent", "name": "Home feed shows",
-          "description": "What the Home tab pulls from your addons' catalogs.",
-          "type": "Dropdown", "default": "0", "options": ["Movies and shows", "Movies only", "Shows only"]},
+          "description": "What the Home tab shows. Everything = live TV channels (if you pasted a "
+                         "channel list) followed by movies and shows from your addons' catalogs.",
+          "type": "Dropdown", "default": "0",
+          "options": ["Everything", "Movies only", "Shows only", "Live TV only"]},
          {"variable": "addonsHeader", "name": "Addons", "description": "", "type": "Header"}]
     for i, a in enumerate(addons):
         s.append({"variable": f"addon{i}", "name": a["name"], "description": a["url"],
@@ -222,7 +224,7 @@ def build(bump, probe, out=DIST):
     config = {
         "name": plugin["name"],
         "description": plugin["description"],
-        "author": plugin.get("author") or "Addon Bridge user",
+        "author": plugin.get("author") or "Movies TV Live user",
         "authorUrl": plugin.get("authorUrl") or "",
         "repositoryUrl": plugin.get("repositoryUrl") or "",
         "scriptUrl": "./script.js",

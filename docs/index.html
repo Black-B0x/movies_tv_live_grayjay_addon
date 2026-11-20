@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>Addon Bridge</title>
+<title>Movies TV Live</title>
 <style>
   :root {
     --bg: #f5f4fa; --card: #ffffff; --fg: #1c1a27; --muted: #5d5970; --line: #dedbe8;
@@ -51,7 +51,7 @@
 <main>
   <header>
     <img src="icon.png" alt="">
-    <div><h1>Addon Bridge</h1><p>Movies and shows from Stremio-protocol addons. Shows are channels, seasons are playlists.</p></div>
+    <div><h1>Movies TV Live</h1><p>Movies and shows from Stremio-protocol addons, plus live TV channels from channel lists you add. Shows and live channels are channels, seasons are playlists.</p></div>
   </header>
 
   <section class="card">
@@ -65,7 +65,16 @@
   </section>
 
   <section class="card">
-    <h2>2. Install</h2>
+    <h2>2. Live TV channel lists (optional)</h2>
+    <p class="hint">Channel list URLs, one per line: a JSON file with a <code>channels</code> array, such as a
+      site's embed manifest. Each channel shows up in Grayjay as its own channel with a live stream.</p>
+    <textarea id="live" spellcheck="false" autocapitalize="off" autocomplete="off"
+      placeholder="https://example.com/embed/manifest.json"></textarea>
+    <ul class="checks" id="livechecks"></ul>
+  </section>
+
+  <section class="card">
+    <h2>3. Install</h2>
     <p class="hint">On the phone that has Grayjay, tap Install. From another screen, show the QR code and scan it in
       Grayjay under Sources &rarr; +.</p>
     <div class="actions">
@@ -77,7 +86,7 @@
   </section>
 
   <section class="card">
-    <h2>Changing addons later</h2>
+    <h2>Changing addons or channel lists later</h2>
     <ol>
       <li>Come back to this page and paste the new list.</li>
       <li>Install again. Grayjay replaces the plugin and keeps your settings.</li>
@@ -87,8 +96,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
-  const ALLOWED_HOSTS = ["cinemeta-catalogs.strem.io", "opensubtitles-v3.strem.io", "pengu.uk", "v3-cinemeta.strem.io"];
-  const ALLOW_ANY = false;
+  const ALLOWED_HOSTS = ["opensubtitles-v3.strem.io", "pengu.uk", "v3-cinemeta.strem.io"];
+  const ALLOW_ANY = true;
   const BUILTIN_BASES = ["https://v3-cinemeta.strem.io", "https://opensubtitles-v3.strem.io"];
 
   const $ = (id) => document.getElementById(id);
@@ -106,11 +115,18 @@
     return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
 
-  function check(line) {
+  function check(line, kind) {
     const url = line.replace(/^stremio:\/\//i, "https://");
     let parsed;
     try { parsed = new URL(url); } catch (e) { return { level: "err", text: "Not a URL" }; }
     if (!/^https?:$/.test(parsed.protocol)) return { level: "err", text: "Must start with https://" };
+    if (kind === "live") {
+      if (!ALLOW_ANY && !ALLOWED_HOSTS.includes(parsed.hostname)) {
+        return { level: "err", text: parsed.hostname + " isn't allowed by this build (add it to extraAllowUrls in plugin.json)" };
+      }
+      if (!/\.json$/i.test(parsed.pathname)) return { level: "warn", text: "Doesn't end in .json; is this the right link?", url: url };
+      return { level: "ok", text: "OK", url: url };
+    }
     if (BUILTIN_BASES.includes(base(url))) return { level: "warn", text: "Already built in, skipped", skip: true };
     if (!ALLOW_ANY && !ALLOWED_HOSTS.includes(parsed.hostname)) {
       return { level: "err", text: parsed.hostname + " isn't allowed by this build (add it to extraAllowUrls in plugin.json)" };
@@ -124,14 +140,15 @@
     try { const u = new URL(url); return u.host + (u.pathname.length > 1 ? "/…" : ""); } catch (e) { return url; }
   }
 
-  function update() {
-    const lines = $("urls").value.split(/\s+/).map((s) => s.trim()).filter(Boolean);
-    const checks = $("checks");
+  // Checks one textarea; returns { good: [urls], blocked: bool }.
+  function collect(inputId, listId, kind) {
+    const lines = $(inputId).value.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+    const checks = $(listId);
     checks.innerHTML = "";
     const good = [];
     let blocked = false;
     lines.forEach((line) => {
-      const r = check(line);
+      const r = check(line, kind);
       const li = document.createElement("li");
       li.className = r.level;
       li.textContent = (r.level === "ok" ? "✓ " : r.level === "warn" ? "! " : "✕ ") + mask(line) + " · " + r.text;
@@ -139,9 +156,19 @@
       if (r.level === "err") blocked = true;
       if (r.url && !r.skip && !good.includes(r.url)) good.push(r.url);
     });
+    return { good, blocked };
+  }
+
+  function update() {
+    const addons = collect("urls", "checks", "addon");
+    const live = collect("live", "livechecks", "live");
+    const blocked = addons.blocked || live.blocked;
+    const params = [];
+    if (addons.good.length) params.push("addons=" + b64url(JSON.stringify(addons.good)));
+    if (live.good.length) params.push("live=" + b64url(JSON.stringify(live.good)));
 
     const configUrl = new URL("config.json", location.href);
-    configUrl.search = good.length ? "?addons=" + b64url(JSON.stringify(good)) : "";
+    configUrl.search = params.length ? "?" + params.join("&") : "";
     currentLink = configUrl.toString();
     const install = $("install");
     install.href = "grayjay://plugin/" + currentLink;
@@ -157,6 +184,7 @@
   }
 
   $("urls").addEventListener("input", update);
+  $("live").addEventListener("input", update);
   $("showqr").addEventListener("click", () => {
     const box = $("qrbox");
     const show = box.style.display !== "block";

@@ -1,13 +1,15 @@
-// Addon Bridge: a Grayjay source that reads Stremio-protocol addons.
+// Movies TV Live: a Grayjay source for Stremio-protocol addons and live TV channel lists.
 //
 //   Movies           -> videos            /item/{type}/{id}
 //   Shows            -> channels          /show/{type}/{id}
 //   Seasons          -> playlists         /show/{type}/{id}/season/{n|first|all}
 //   Episodes         -> videos            /show/{type}/{id}/video/{videoId}
 //   Genres           -> channels          /genre/{type}/{genre}
+//   Live TV channels -> channels          /live/{list}/{channelId}
+//   Live broadcast   -> live videos       /live/{list}/{channelId}/watch
 //
-// The built-in addon list below is replaced by build.py from plugin.json. More addons can be
-// pasted on the install page (see enabledAddons).
+// The built-in addon list below is replaced by build.py from plugin.json. More addons, and live
+// channel lists, can be pasted on the install page (see enabledAddons and liveLists).
 
 const ADDONS = [
     {
@@ -28,6 +30,9 @@ const MAX_HOME_CATALOGS = 8;
 const MANIFEST_TTL_MS = 6 * 60 * 60 * 1000;
 const META_TTL_MS = 15 * 60 * 1000;
 const MAX_SUBS_PER_LANGUAGE = 4;
+const LIVE_TTL_MS = 5 * 60 * 1000;
+const LIVE_PER_HOME_PAGE = 8;
+const LIVE_SEARCH_LIMIT = 30;
 
 // Must match the option order in build.py.
 const MAX_HEIGHT_OPTIONS = [Infinity, 2160, 1080, 720, 480];
@@ -53,6 +58,8 @@ let config = {};
 let settings = {};
 let state = { manifests: {} };
 let pastedAddons = [];
+let pastedLive = [];
+let liveCache = { at: 0, lists: [] };
 const metaCache = {};
 
 // ---------------------------------------------------------------- lifecycle
@@ -60,14 +67,16 @@ const metaCache = {};
 source.enable = function (conf, pluginSettings, savedState) {
     config = conf ?? {};
     settings = pluginSettings ?? {};
-    pastedAddons = readPastedAddons(config.sourceUrl);
+    pastedAddons = readPastedUrls(config.sourceUrl, "addons");
+    pastedLive = readPastedUrls(config.sourceUrl, "live");
+    liveCache = { at: 0, lists: [] };
     state = { manifests: {} };
     if (savedState) {
         try {
             const parsed = JSON.parse(savedState);
             if (parsed && parsed.manifests) state = parsed;
         } catch (e) {
-            log("Addon Bridge: ignoring unreadable saved state");
+            log("Movies TV Live: ignoring unreadable saved state");
         }
     }
 };
@@ -81,7 +90,9 @@ source.saveState = function () {
 // ---------------------------------------------------------------- home & search
 
 source.getHome = function () {
-    const mode = settingIndex("homeContent", 0); // 0 both, 1 movies, 2 shows
+    const mode = settingIndex("homeContent", 0); // 0 everything, 1 movies, 2 shows, 3 live TV
+    const live = mode === 0 || mode === 3 ? allLiveChannels().map(liveVideo) : [];
+    if (mode === 3 && live.length) return new ArrayPager(live, 0, PAGE_SIZE);
     const entries = [];
     for (const addon of activeAddons()) {
         for (const cat of addon.manifest.catalogs || []) {
@@ -92,7 +103,7 @@ source.getHome = function () {
             entries.push(catalogEntry(addon, cat, extra));
         }
     }
-    return new CatalogPager(entries.slice(0, MAX_HOME_CATALOGS), {});
+    return new CatalogPager(entries.slice(0, MAX_HOME_CATALOGS), {}, null, live, LIVE_PER_HOME_PAGE);
 };
 
 source.searchSuggestions = function () { return []; };
@@ -102,10 +113,12 @@ source.getSearchCapabilities = function () {
 };
 
 source.search = function (query) {
-    return new CatalogPager(searchEntries(query, null), {});
+    const live = searchLive(query).map(liveVideo);
+    return new CatalogPager(searchEntries(query, null), {}, null, live, LIVE_SEARCH_LIMIT);
 };
 
 source.searchChannels = function (query) {
+    const live = searchLive(query).map(liveChannel);
     const page = fetchCatalogPage(searchEntries(query, true), {});
     const channels = page.items
         .filter(x => isSeriesType(x.type))
@@ -118,7 +131,7 @@ source.searchChannels = function (query) {
             description: x.meta.description || x.meta.releaseInfo || "",
             url: showUrl(x.type, x.meta.id)
         }));
-    return new ChannelPager(channels, false, {});
+    return new ChannelPager(live.concat(channels), false, {});
 };
 
 source.searchPlaylists = function (query) {
@@ -132,11 +145,13 @@ source.searchPlaylists = function (query) {
 // ---------------------------------------------------------------- channels (shows & genres)
 
 source.isChannelUrl = function (url) {
-    return RE_SHOW.test(url) || RE_GENRE.test(url);
+    return RE_SHOW.test(url) || RE_GENRE.test(url) || RE_LIVE.test(url);
 };
 
 source.getChannel = function (url) {
-    let m = url.match(RE_SHOW);
+    let m = url.match(RE_LIVE);
+    if (m) return liveChannel(requireLiveChannel(dec(m[1]), dec(m[2])));
+    m = url.match(RE_SHOW);
     if (m) {
         const type = dec(m[1]), id = dec(m[2]);
         const meta = requireMeta(type, id);
@@ -165,7 +180,7 @@ source.getChannel = function (url) {
             url: genreUrl(type, genre)
         });
     }
-    throw new ScriptException("Not an Addon Bridge channel: " + url);
+    throw new ScriptException("Not a Movies TV Live channel: " + url);
 };
 
 source.getChannelCapabilities = function () {
@@ -173,7 +188,9 @@ source.getChannelCapabilities = function () {
 };
 
 source.getChannelContents = function (url) {
-    let m = url.match(RE_SHOW);
+    let m = url.match(RE_LIVE);
+    if (m) return new ListPager([liveVideo(requireLiveChannel(dec(m[1]), dec(m[2])))], 0, PAGE_SIZE);
+    m = url.match(RE_SHOW);
     if (m) {
         const type = dec(m[1]), id = dec(m[2]);
         const meta = requireMeta(type, id);
@@ -219,7 +236,7 @@ source.isPlaylistUrl = function (url) {
 
 source.getPlaylist = function (url) {
     const m = url.match(RE_SEASON);
-    if (!m) throw new ScriptException("Not an Addon Bridge season: " + url);
+    if (!m) throw new ScriptException("Not a Movies TV Live season: " + url);
     const type = dec(m[1]), id = dec(m[2]), wanted = dec(m[3]);
     const meta = requireMeta(type, id);
     const seasons = seasonsOf(meta);
@@ -245,11 +262,13 @@ source.getPlaylist = function (url) {
 // ---------------------------------------------------------------- content details
 
 source.isContentDetailsUrl = function (url) {
-    return RE_ITEM.test(url) || RE_EPISODE.test(url);
+    return RE_ITEM.test(url) || RE_EPISODE.test(url) || RE_LIVE_WATCH.test(url);
 };
 
 source.getContentDetails = function (url) {
-    let m = url.match(RE_EPISODE);
+    let m = url.match(RE_LIVE_WATCH);
+    if (m) return liveDetails(requireLiveChannel(dec(m[1]), dec(m[2])));
+    m = url.match(RE_EPISODE);
     if (m) {
         const type = dec(m[1]), showId = dec(m[2]), videoId = dec(m[3]);
         const bundle = fetchDetailsBundle(type, showId, type, videoId);
@@ -288,7 +307,7 @@ source.getContentDetails = function (url) {
         return details;
     }
 
-    throw new ScriptException("Not an Addon Bridge item: " + url);
+    throw new ScriptException("Not a Movies TV Live item: " + url);
 };
 
 // Fetches meta, streams and subtitles in one parallel batch.
@@ -644,19 +663,38 @@ function fetchCatalogPage(entries, seen) {
     return { items: items, hasMore: entries.some(e => !e.done) };
 }
 
+// Catalog results, optionally led on each page by the next `chunk` of `extras` (live videos).
 class CatalogPager extends ContentPager {
-    constructor(entries, seen, excludeId) {
+    constructor(entries, seen, excludeId, extras, chunk, offset) {
+        extras = extras || [];
+        offset = offset || 0;
+        const lead = extras.slice(offset, offset + (chunk || 0));
         const page = fetchCatalogPage(entries, seen);
         const results = page.items
             .filter(x => !(excludeId && x.meta.id === excludeId))
             .map(x => isSeriesType(x.type) ? showAsPlaylist(x.meta, x.type) : titleVideo(x.meta, x.type));
-        super(results, page.hasMore, {});
+        const next = offset + lead.length;
+        super(lead.concat(results), page.hasMore || next < extras.length, {});
         this.entries = entries;
         this.seen = seen;
         this.excludeId = excludeId;
+        this.extras = extras;
+        this.chunk = chunk;
+        this.offset = next;
     }
     nextPage() {
-        return new CatalogPager(this.entries, this.seen, this.excludeId);
+        return new CatalogPager(this.entries, this.seen, this.excludeId, this.extras, this.chunk, this.offset);
+    }
+}
+
+class ArrayPager extends ContentPager {
+    constructor(all, offset, size) {
+        super(all.slice(offset, offset + size), offset + size < all.length, { offset: offset });
+        this.all = all;
+        this.size = size;
+    }
+    nextPage() {
+        return new ArrayPager(this.all, this.context.offset + this.size, this.size);
     }
 }
 
@@ -814,6 +852,248 @@ function newestFirst(a, b) {
     return (tb - ta) || -airOrder(a, b);
 }
 
+// ---------------------------------------------------------------- live TV
+//
+// A live channel list is a JSON file the user pastes on the install page, shaped like
+//   { "name": "...", "baseUrl": "https://site/embed/", "variant": "embed",
+//     "channels": [{ "id", "name", "region", "flag", "quality", "sport", "live", "url" }] }
+// Each channel becomes a Grayjay channel whose only video is its live broadcast.
+//
+// Where a channel's stream comes from, first match wins:
+//   1. a stream field on the channel: "stream", "streamUrl", "m3u8" or "hls"
+//   2. the channel's "url" when it is an .m3u8 playlist
+//   3. a "streamUrl" template on the list, with {id} replaced by the channel id
+//   4. for "variant": "embed" lists, the site's IPTV endpoint: https://iptv.<host>/api?channel={id}
+// Now/next listings come from the list's "epg" URL, or epg.json next to the list.
+// Requests carry the list site's Referer and Origin unless the list gives "headers".
+
+function liveLists() {
+    if (!pastedLive.length) return [];
+    if (liveCache.at && Date.now() - liveCache.at < LIVE_TTL_MS) return liveCache.lists;
+
+    const guessEpg = url => url.replace(/[?#].*$/, "").replace(/[^/]*$/, "epg.json");
+    const results = getJsonMany(pastedLive.flatMap(url => [url, guessEpg(url)]));
+    const keys = {};
+    const lists = [];
+    const declaredEpg = [];
+    pastedLive.forEach((url, i) => {
+        const json = results[i * 2];
+        if (!json || !Array.isArray(json.channels)) {
+            log("Movies TV Live: could not load live channel list " + hostOf(url));
+            return;
+        }
+        let key = hostOf(url).replace(/^www\./, "");
+        for (let n = 2; keys[key]; n++) key = hostOf(url) + "~" + n;
+        keys[key] = true;
+        const list = buildLiveList(key, url, json);
+        const epgUrl = typeof json.epg === "string" ? json.epg : json.epgUrl;
+        if (typeof epgUrl === "string" && /^https?:\/\//i.test(epgUrl) && epgUrl !== guessEpg(url)) {
+            declaredEpg.push({ list: list, url: epgUrl });
+        } else {
+            list.epg = epgMap(results[i * 2 + 1]);
+        }
+        lists.push(list);
+    });
+    if (declaredEpg.length) {
+        const epgs = getJsonMany(declaredEpg.map(d => d.url));
+        declaredEpg.forEach((d, i) => { d.list.epg = epgMap(epgs[i]); });
+    }
+
+    // Keep the previous copy if every list failed to load (e.g. a brief outage).
+    if (!lists.length && liveCache.lists.length) {
+        liveCache.at = Date.now();
+        return liveCache.lists;
+    }
+    liveCache = { at: Date.now(), lists: lists };
+    return lists;
+}
+
+function buildLiveList(key, url, json) {
+    const origin = originOf(json.baseUrl) || originOf(url);
+    const headers = { "User-Agent": PLAYER_USER_AGENT };
+    if (json.headers && typeof json.headers === "object") {
+        Object.keys(json.headers).forEach(k => {
+            if (typeof json.headers[k] === "string") headers[canonicalHeader(k)] = json.headers[k];
+        });
+    } else if (origin) {
+        headers["Referer"] = origin + "/";
+        headers["Origin"] = origin;
+    }
+    // "example.com embed manifest" -> "example.com"
+    const name = oneLine(json.name).replace(/\s+(embed\s+)?(manifest|channel list|channels)$/i, "");
+    const list = { key: key, url: url, name: name || hostOf(url), headers: headers, epg: {}, channels: [] };
+    const seen = {};
+    json.channels.forEach(c => {
+        if (!c || c.id === undefined || c.id === null || c.live === false) return;
+        const id = String(c.id);
+        const name = oneLine(c.name) || id;
+        if (seen[id] || /\[broken\]/i.test(name)) return;
+        const stream = liveStreamUrl(c, json, url);
+        if (!stream) return;
+        seen[id] = true;
+        list.channels.push({
+            list: list, id: id, name: name, stream: stream,
+            page: typeof c.url === "string" && /^https?:\/\//i.test(c.url) ? c.url : null,
+            region: oneLine(c.region), flag: String(c.flag || "").toLowerCase(),
+            quality: oneLine(c.quality), category: oneLine(c.sport || c.category || c.group),
+            tagline: oneLine(c.tagline || c.description),
+            logo: [c.logo, c.icon, c.thumbnail, c.image].find(x => typeof x === "string" && /^https?:\/\//i.test(x)) || null
+        });
+    });
+    return list;
+}
+
+function liveStreamUrl(c, json, listUrl) {
+    const isHttp = u => typeof u === "string" && /^https?:\/\//i.test(u);
+    const own = [c.stream, c.streamUrl, c.m3u8, c.hls].find(isHttp);
+    if (own) return own;
+    if (isHttp(c.url) && /\.m3u8(\?|#|$)/i.test(c.url)) return c.url;
+    const id = encodeURIComponent(String(c.id));
+    if (isHttp(json.streamUrl) && json.streamUrl.indexOf("{id}") >= 0) return json.streamUrl.split("{id}").join(id);
+    if (json.variant === "embed") {
+        const host = hostOf(json.baseUrl || listUrl).replace(/^www\./, "");
+        return "https://iptv." + host + "/api?channel=" + id;
+    }
+    return null;
+}
+
+function epgMap(json) {
+    const map = {};
+    ((json && json.channels) || []).forEach(e => { if (e && e.id !== undefined) map[String(e.id)] = e; });
+    return map;
+}
+
+function allLiveChannels() {
+    return liveLists().flatMap(l => l.channels);
+}
+
+function requireLiveChannel(key, id) {
+    const list = liveLists().find(l => l.key === key);
+    if (!list) {
+        throw new UnavailableException("The live channel list from " + key + " isn't loaded. " +
+            "Check that it is still pasted on the plugin's install page.");
+    }
+    const channel = list.channels.find(c => c.id === id);
+    if (!channel) throw new UnavailableException(list.name + " no longer lists this channel.");
+    return channel;
+}
+
+function searchLive(query) {
+    const words = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    return allLiveChannels().filter(c => {
+        const prog = nowNext(c).now;
+        const text = [c.name, c.category, c.region, c.list.name, prog && prog.title].join(" ").toLowerCase();
+        return words.every(w => text.indexOf(w) >= 0);
+    });
+}
+
+// The current and next programme, skipping entries that have already ended.
+function nowNext(c) {
+    const e = c.list.epg[c.id];
+    if (!e) return { now: null, next: null };
+    const t = Date.now();
+    const ended = p => p && Date.parse(p.stop || "") < t;
+    let now = e.now || null, next = e.next || null;
+    if (ended(now)) { now = ended(next) ? null : next; next = null; }
+    return { now: now, next: next };
+}
+
+function liveImage(c) {
+    if (c.logo) return c.logo;
+    return /^[a-z]{2}$/.test(c.flag) ? "https://flagcdn.com/w320/" + c.flag + ".png" : null;
+}
+
+function liveAuthor(c) {
+    return new PlatformAuthorLink(pid("live:" + c.list.key + ":" + c.id), c.name, liveChannelUrl(c), liveImage(c));
+}
+
+function liveChannel(c) {
+    const prog = nowNext(c);
+    const facts = [c.category, c.region || (c.flag ? c.flag.toUpperCase() : ""), c.quality, c.list.name].filter(Boolean);
+    const parts = [c.tagline, facts.join(" · "), describeProgramme("Now", prog.now), describeProgramme("Next", prog.next)];
+    const links = {};
+    if (c.page) links[c.list.name] = c.page;
+    return new PlatformChannel({
+        id: pid("live:" + c.list.key + ":" + c.id),
+        name: c.name,
+        thumbnail: liveImage(c),
+        subscribers: 0,
+        description: parts.filter(Boolean).join("\n\n"),
+        url: liveChannelUrl(c),
+        links: links
+    });
+}
+
+function liveVideo(c) {
+    const prog = nowNext(c).now;
+    return new PlatformVideo({
+        id: pid("live:" + c.list.key + ":" + c.id + ":watch"),
+        name: prog && prog.title ? oneLine(prog.title) : c.name + " (live)",
+        thumbnails: thumbnailsFor(liveImage(c)),
+        author: liveAuthor(c),
+        datetime: toSeconds(prog && prog.start) || Math.floor(Date.now() / 1000),
+        duration: 0,
+        url: liveWatchUrl(c),
+        isLive: true
+    });
+}
+
+function liveDetails(c) {
+    const prog = nowNext(c);
+    checkLiveStream(c);
+    const source = new HLSSource({
+        name: [c.quality || "Live", c.list.name].join(" · "),
+        url: c.stream,
+        duration: 0,
+        priority: true,
+        requestModifier: { headers: Object.assign({}, c.list.headers) }
+    });
+    const details = new PlatformVideoDetails(Object.assign({}, liveVideo(c), {
+        description: [c.name, describeProgramme("Now", prog.now), describeProgramme("Next", prog.next),
+            c.tagline].filter(Boolean).join("\n\n"),
+        video: new VideoSourceDescriptor([source]),
+        live: source
+    }));
+    details.getContentRecommendations = function () {
+        const others = allLiveChannels().filter(o => o !== c);
+        const same = others.filter(o => c.category && o.category === c.category);
+        const rest = others.filter(o => same.indexOf(o) < 0);
+        return new VideoPager(same.concat(rest).slice(0, 20).map(liveVideo), false, {});
+    };
+    return details;
+}
+
+// A quick look before handing the stream to the player, so an offline channel gets a clear
+// message instead of a spinning player. Network errors are ignored; the player gets its turn.
+function checkLiveStream(c) {
+    let res;
+    try { res = http.GET(c.stream, c.list.headers, false); }
+    catch (e) { log("Movies TV Live: could not check " + c.name + ": " + e); return; }
+    if (!res.isOk || String(res.body || "").indexOf("#EXTM3U") < 0) {
+        throw new UnavailableException(c.name + " is offline right now (HTTP " + res.code + "). Try another channel.");
+    }
+}
+
+function describeProgramme(label, p) {
+    if (!p || !p.title) return "";
+    const times = [p.start, p.stop].map(clockTime).filter(Boolean).join("–");
+    const head = label + (times ? " (" + times + ")" : "") + ": " + oneLine(p.title);
+    return p.desc ? head + "\n" + oneLine(p.desc) : head;
+}
+
+function clockTime(iso) {
+    const t = Date.parse(iso || "");
+    if (isNaN(t)) return "";
+    const d = new Date(t);
+    return pad(d.getHours()) + ":" + pad(d.getMinutes());
+}
+
+function originOf(url) {
+    const m = /^(https?:\/\/[^/?#]+)/i.exec(url || "");
+    return m ? m[1] : null;
+}
+
 // ---------------------------------------------------------------- addons & manifests
 
 // Built-in addons (from plugin.json, each with an on/off setting) followed by the addons the
@@ -836,15 +1116,16 @@ function enabledAddons() {
     return builtIn.concat(pasted).filter(a => !a.setting || settingBool(a.setting, true));
 }
 
-function readPastedAddons(sourceUrl) {
-    const m = /[?&]addons=([A-Za-z0-9_-]+)/.exec(sourceUrl || "");
+// Reads a base64url JSON array of URLs from the install link, e.g. ?addons=... or &live=...
+function readPastedUrls(sourceUrl, param) {
+    const m = new RegExp("[?&]" + param + "=([A-Za-z0-9_-]+)").exec(sourceUrl || "");
     if (!m) return [];
     try {
         const list = JSON.parse(base64UrlDecode(m[1]));
         if (!Array.isArray(list)) return [];
         return list.filter(u => typeof u === "string" && /^(https?|stremio):\/\//i.test(u));
     } catch (e) {
-        log("Addon Bridge: could not read the addons in the install link");
+        log("Movies TV Live: could not read the " + param + " list in the install link");
         return [];
     }
 }
@@ -875,7 +1156,7 @@ function activeAddons() {
         stale.forEach((a, i) => {
             if (results[i] && results[i].id) state.manifests[a.base] = { fetchedAt: now, manifest: results[i] };
             else if (state.manifests[a.base]) state.manifests[a.base].fetchedAt = now; // keep stale copy, retry later
-            else log("Addon Bridge: could not load manifest for " + a.name);
+            else log("Movies TV Live: could not load manifest for " + a.name);
         });
     }
     return addons
@@ -967,14 +1248,14 @@ function getJsonMany(urls) {
             urls.forEach(u => { batch = batch.GET(u, {}, false); });
             responses = batch.execute();
         } catch (e) {
-            log("Addon Bridge: batch request failed, retrying one by one: " + e);
+            log("Movies TV Live: batch request failed, retrying one by one: " + e);
         }
     }
     return urls.map((u, i) => {
         let res = responses ? responses[i] : null;
         if (!responses) {
             try { res = http.GET(u, {}, false); }
-            catch (e) { log("Addon Bridge: request failed " + u + ": " + e); return null; }
+            catch (e) { log("Movies TV Live: request failed " + u + ": " + e); return null; }
         }
         if (!res || !res.isOk || !res.body) return null;
         try { return JSON.parse(res.body); } catch (e) { return null; }
@@ -990,12 +1271,16 @@ const RE_SHOW = new RegExp("^" + BASE_RE + "/show/" + SEG + "/" + SEG + "/?$");
 const RE_SEASON = new RegExp("^" + BASE_RE + "/show/" + SEG + "/" + SEG + "/season/" + SEG + "/?$");
 const RE_EPISODE = new RegExp("^" + BASE_RE + "/show/" + SEG + "/" + SEG + "/video/" + SEG + "/?$");
 const RE_GENRE = new RegExp("^" + BASE_RE + "/genre/" + SEG + "/" + SEG + "/?$");
+const RE_LIVE = new RegExp("^" + BASE_RE + "/live/" + SEG + "/" + SEG + "/?$");
+const RE_LIVE_WATCH = new RegExp("^" + BASE_RE + "/live/" + SEG + "/" + SEG + "/watch/?$");
 
 function itemUrl(type, id) { return BASE + "/item/" + enc(type) + "/" + enc(id); }
 function showUrl(type, id) { return BASE + "/show/" + enc(type) + "/" + enc(id); }
 function seasonUrl(type, id, key) { return showUrl(type, id) + "/season/" + enc(key); }
 function episodeUrl(type, id, videoId) { return showUrl(type, id) + "/video/" + enc(videoId); }
 function genreUrl(type, genre) { return BASE + "/genre/" + enc(type) + "/" + enc(genre); }
+function liveChannelUrl(c) { return BASE + "/live/" + enc(c.list.key) + "/" + enc(c.id); }
+function liveWatchUrl(c) { return liveChannelUrl(c) + "/watch"; }
 function imdbUrl(id) {
     const m = /^(tt\d+)/.exec(id || "");
     return m ? "https://www.imdb.com/title/" + m[1] + "/" : null;
@@ -1004,7 +1289,7 @@ function imdbUrl(id) {
 // ---------------------------------------------------------------- small helpers
 
 function pid(value) {
-    return new PlatformID(config.name || "Addon Bridge", value, config.id);
+    return new PlatformID(config.name || "Movies TV Live", value, config.id);
 }
 
 function isSeriesType(type) { return SERIES_TYPES.indexOf(type) >= 0; }
@@ -1060,4 +1345,4 @@ function runtimeSeconds(text) {
     return isNaN(plain) ? 0 : plain * 60;
 }
 
-log("Addon Bridge loaded with " + ADDONS.length + " built-in addon(s)");
+log("Movies TV Live loaded with " + ADDONS.length + " built-in addon(s)");

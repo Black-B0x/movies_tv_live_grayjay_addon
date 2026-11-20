@@ -1,24 +1,21 @@
 {
-  "name": "Addon Bridge",
-  "description": "Movies and shows from Stremio-protocol addons. Shows are channels, seasons are playlists.",
+  "name": "Movies TV Live",
+  "description": "Movies and shows from Stremio-protocol addons, plus live TV channels from channel lists you add. Shows and live channels are channels, seasons are playlists.",
   "author": "Black-B0x",
   "authorUrl": "https://github.com/Black-B0x",
-  "repositoryUrl": "https://github.com/Black-B0x/grayjay-addon-bridge",
+  "repositoryUrl": "https://github.com/Black-B0x/movies_tv_live_grayjay_addon",
   "scriptUrl": "./script.js",
   "iconUrl": "./icon.png",
   "id": "197e322b-ec7f-42f3-a302-dabbcaf75749",
-  "version": 2,
-  "scriptSignature": "VnPWZicOfchL4Rm6Jo9tLYH2xQSJtT8b4A1VwR6aFlM2zvpkBGiHaf/rfDF1v6Yb9HuWQMEJXbS9fumye5K9QuOHgFzW7BQeLFSwAbX0+HZgSUR3H9mLtXneEC337xxaYUvr3nLE2JFh4olIp7aMHxxQdLPFCOKYWik2nPE1JzbJPlKJWrggkfOurgscrdkLkTufxZ2RnA1VphNW/zD0yQQXSt7PL3PYBEOYgukMS04rwP58seURFYd4qaWrJujuWZ+Wwv7xbSiLrYWUc/7BSmfqH6uXn9xs8bqendY2t2DM9dOFRwwkJn6oEh5S/1mMQfy88ZdRqLZN0YdSxkkPIA==",
+  "version": 3,
+  "scriptSignature": "raixiySn6yNirGm2jqjKqZ1eFVAfkP8vO4aF8LqGdNBVOSFlxSkr6/3UGorQVfcBFSp8JBaOx/hRTJ4JBR0r5Sd+y3ZRYgZp7GoYbmeMfE30HBIwH0arq5o12QcTJDKSzS+1N21OZ0hONddQJK+GEr29qAjOjRdL7zDkDc08rI/PyU94TRePm9RFKLnU1nu48i0n2fNiZwAWh46XvufsSV3+dL4mdFxy1nCd8un0+fYQrkP60QleQPl4JVuHL3ov5xqi1JCgm1BFdvTVQf8ouREyqRTfpvgD8p2JUknjv6vTKAeWl9k748SXOH154JDERcq/v+qvZhd/rrYi4GmRwA==",
   "scriptPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4Q7/KMHe7L7MqfpyBk+n9Keoq5rZvytIjeAjKozSYkri0zao68/HRcY9vMxisPXu85RpE1avTgUL1Rtm2kRs8Us1XgypD41UFXeuM7x5/sBZeyxV6Ssur6AOgFluymJh1Qp3D3A78vChVLwwJk9sNR+wj91BDWmq9/OMEeZcLdNsp8Gxpxy1zrfHjrHuPXqpr1EiSHNCatXW8kkLDW9c4HVrn1UiF7uBKKU6b23oPkJQNBnKlof57BRAIMqw8NgCr9Hz21EZuJC3KQDaRZLghebhWBa3mvKKAN8H+dYU43CqHvlbo+BmOJjsRHq/VaytYdXj26VffCKR+fEnCUu0dwIDAQAB",
   "packages": [
     "Http"
   ],
   "allowEval": false,
   "allowUrls": [
-    "cinemeta-catalogs.strem.io",
-    "opensubtitles-v3.strem.io",
-    "pengu.uk",
-    "v3-cinemeta.strem.io"
+    "everywhere"
   ],
   "settings": [
     {
@@ -30,13 +27,14 @@
     {
       "variable": "homeContent",
       "name": "Home feed shows",
-      "description": "What the Home tab pulls from your addons' catalogs.",
+      "description": "What the Home tab shows. Everything = live TV channels (if you pasted a channel list) followed by movies and shows from your addons' catalogs.",
       "type": "Dropdown",
       "default": "0",
       "options": [
-        "Movies and shows",
+        "Everything",
         "Movies only",
-        "Shows only"
+        "Shows only",
+        "Live TV only"
       ]
     },
     {

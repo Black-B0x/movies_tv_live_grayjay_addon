@@ -19,7 +19,10 @@ const config = JSON.parse(fs.readFileSync(path.join(ROOT, "docs", "config.json")
 const plugin = JSON.parse(fs.readFileSync(path.join(ROOT, "plugin.json"), "utf8"));
 const MOCK = "https://mock-streams.test";
 const addons = plugin.addons;
-const allowHosts = new Set([...config.allowUrls, "mock-streams.test"]);
+const LIVE = "https://mock-live.test";
+const allowAny = config.allowUrls.includes("everywhere");
+const allowHosts = new Set([...config.allowUrls, "mock-streams.test", "mock-live.test", "iptv.mock-live.test"]);
+const allowed = (host) => allowAny || allowHosts.has(host);
 
 // ---------------- fake stream addon
 function mockResponse(url) {
@@ -42,6 +45,33 @@ function mockResponse(url) {
     ] };
 }
 
+// ---------------- fake live channel list (an embed-style manifest + epg.json)
+const hour = 3600 * 1000, now = Date.now();
+const iso = (t) => new Date(t).toISOString();
+function liveResponse(url) {
+    const p = url.slice(url.indexOf(".test") + 5);
+    if (url.startsWith(LIVE) && p === "/embed/manifest.json") return { name: "Mock Live", variant: "embed",
+        baseUrl: LIVE + "/embed/", channels: [
+            { id: "news1", name: "Mock News", region: "UK", flag: "gb", quality: "FHD", sport: "", live: true, url: LIVE + "/embed/news1" },
+            { id: "sport 2", name: "Mock Sports 2", region: "", flag: "us", quality: "HD", sport: "Sports", live: true, url: LIVE + "/embed/sport%202" },
+            { id: "sport3", name: "Mock Sports 3", flag: "us", quality: "HD", sport: "Sports", live: true, url: LIVE + "/embed/sport3" },
+            { id: "direct", name: "Direct HLS", flag: "", sport: "Other", url: "https://cdn.test/live/direct.m3u8" },
+            { id: "broken", name: "z[broken]", flag: "gb", sport: "Sports", url: LIVE + "/embed/broken" },
+            { id: "off", name: "Off Air", live: false, url: LIVE + "/embed/off" },
+            { id: "dead", name: "Dead Channel", sport: "Sports", url: LIVE + "/embed/dead" },
+        ] };
+    if (url.startsWith(LIVE) && p === "/embed/epg.json") return { channels: [
+        { id: "news1", now: { title: "Old Show", start: iso(now - 3 * hour), stop: iso(now - hour) },
+                       next: { title: "Evening News", desc: "Headlines.", start: iso(now - hour), stop: iso(now + hour) } },
+        { id: "sport 2", now: { title: "Cup Final", desc: "Live match.", start: iso(now - hour), stop: iso(now + hour) },
+                         next: { title: "Highlights", start: iso(now + hour), stop: iso(now + 2 * hour) } },
+    ] };
+    if (url === "https://cdn.test/live/direct.m3u8") return "#EXTM3U\n";
+    const m = url.match(/^https:\/\/iptv\.mock-live\.test\/api\?channel=(.+)$/);
+    if (m) return decodeURIComponent(m[1]) === "dead" ? null : "#EXTM3U\n#EXTINF:8,\nseg.ts\n";
+    return undefined;
+}
+
 // ---------------- assertions
 let failures = 0;
 function check0(cond, msg) { if (!cond) { failures++; console.log("  FAIL " + msg); } }
@@ -51,7 +81,12 @@ let requestCount = 0;
 function doGet(url) {
     requestCount++;
     const host = new URL(url).hostname;
-    if (!allowHosts.has(host)) throw new Error(`allowUrls violation: ${host} (${url})`);
+    if (!allowed(host)) throw new Error(`allowUrls violation: ${host} (${url})`);
+    if (/\.test$/.test(host) && host !== "mock-streams.test") {
+        const body = liveResponse(url);
+        if (body === undefined || body === null) return { url, code: body === null ? 403 : 404, isOk: false, body: "no", headers: {} };
+        return { url, code: 200, isOk: true, body: typeof body === "string" ? body : JSON.stringify(body), headers: {} };
+    }
     if (url.startsWith(MOCK)) {
         const body = mockResponse(url);
         return body ? { url, code: 200, isOk: true, body: JSON.stringify(body), headers: {} }
@@ -62,11 +97,12 @@ function doGet(url) {
     const i = out.lastIndexOf("\n@@");
     const [code, effective] = out.slice(i + 3).split(" ");
     const effHost = new URL(effective).hostname;
-    if (!allowHosts.has(effHost)) throw new Error(`allowUrls violation after redirect: ${effHost}`);
+    if (!allowed(effHost)) throw new Error(`allowUrls violation after redirect: ${effHost}`);
     return { url: effective, code: +code, isOk: +code >= 200 && +code < 300, body: out.slice(0, i), headers: {} };
 }
+const lastHeaders = {};
 const http = {
-    GET: (url) => doGet(url),
+    GET: (url, headers) => { lastHeaders[url] = headers; return doGet(url); },
     batch() {
         const urls = [];
         const b = { GET(url) { urls.push(url); return b; }, execute: () => urls.map(doGet) };
@@ -85,7 +121,8 @@ vm.runInContext(fs.readFileSync(path.join(ROOT, "docs", "script.js"), "utf8"), c
 const b64url = (o) => Buffer.from(JSON.stringify(o), "utf8").toString("base64url");
 check0(!("sourceUrl" in config), "config.json must not contain sourceUrl");
 const pasted = [MOCK + "/manifest.json", plugin.addons[0].url /* duplicate of a built-in: ignored */];
-const installedConfig = { ...config, sourceUrl: "https://example.github.io/bridge/config.json?addons=" + b64url(pasted) };
+const installedConfig = { ...config, sourceUrl: "https://example.github.io/bridge/config.json?addons=" + b64url(pasted) +
+    "&live=" + b64url([LIVE + "/embed/manifest.json"]) };
 
 const defaults = {};
 for (const s of config.settings) if (s.default !== undefined) defaults[s.variable] = s.default;
@@ -109,15 +146,18 @@ const checkContent = (c, where) => {
 let home, movieUrl, showUrl, seasonUrl, episodeUrl;
 section("getHome", () => {
     home = source.getHome();
+    const live = home.results.filter(c => c.isLive);
+    check(live.length === 5 && home.results.slice(0, 5).every(c => c.isLive), `live channels lead home (${live.length})`);
     check(home.results.length > 20, `home has results (${home.results.length})`);
     home.results.forEach((c, i) => checkContent(c, `home[${i}]`));
     const kinds = home.results.reduce((a, c) => (a[c.plugin_type] = (a[c.plugin_type] || 0) + 1, a), {});
     console.log("    home kinds:", JSON.stringify(kinds), "hasMore:", home.hasMore);
     const next = home.nextPage();
     check(next.results.length > 0, "home page 2 has results");
+    check(next.results.every(c => !c.isLive), "live channels only on the first page when there are few");
     const ids = new Set(home.results.map(c => c.id.value));
     check(next.results.every(c => !ids.has(c.id.value)), "home page 2 has no duplicates of page 1");
-    movieUrl = home.results.find(c => c.plugin_type === "PlatformVideo").url;
+    movieUrl = home.results.find(c => c.plugin_type === "PlatformVideo" && !c.isLive).url;
 });
 section("home: movies only", () => {
     source.enable(installedConfig, settingsFor({ homeContent: "1" }), source.saveState());
@@ -125,11 +165,56 @@ section("home: movies only", () => {
     check(h.results.every(c => c.plugin_type === "PlatformVideo"), "only videos");
     source.enable(installedConfig, settingsFor(), source.saveState());
 });
+section("live TV: home modes", () => {
+    source.enable(installedConfig, settingsFor({ homeContent: "3" }), source.saveState());
+    const h = source.getHome();
+    check(h.results.length === 5 && h.results.every(c => c.isLive), "live-only home");
+    console.log("    live:", h.results.map(v => `${v.name} [${v.author.name}]`).join(" | "));
+    check(!h.results.some(v => /broken|Off Air/.test(v.author.name)), "broken and off-air channels hidden");
+    check(h.results.find(v => v.author.name === "Mock News").name === "Evening News", "ended programme skipped for next");
+    check(h.results.find(v => v.author.name === "Mock Sports 3").name === "Mock Sports 3 (live)", "no EPG falls back to channel name");
+    source.enable(installedConfig, settingsFor({ homeContent: "1" }), source.saveState());
+    check(source.getHome().results.every(c => !c.isLive), "movies-only home has no live TV");
+    source.enable(installedConfig, settingsFor(), source.saveState());
+});
+let liveChannelUrl, liveWatchUrl;
+section("live TV: channel, contents, details", () => {
+    const r = source.searchChannels("sports");
+    const ch = r.results.find(c => c.name === "Mock Sports 2");
+    check(ch && source.isChannelUrl(ch.url) && !source.isContentDetailsUrl(ch.url), "live channel via searchChannels");
+    liveChannelUrl = ch.url;
+    const full = source.getChannel(liveChannelUrl);
+    check(full.thumbnail === "https://flagcdn.com/w320/us.png", "flag thumbnail");
+    check(/Now \(.*\): Cup Final/.test(full.description) && /Next/.test(full.description), "now/next in description");
+    const items = source.getChannelContents(liveChannelUrl, "VIDEOS", null, {});
+    check(items.results.length === 1 && items.results[0].isLive, "channel has its live video");
+    liveWatchUrl = items.results[0].url;
+    check(source.isContentDetailsUrl(liveWatchUrl) && !source.isChannelUrl(liveWatchUrl), "watch url routes to content");
+    const d = source.getContentDetails(liveWatchUrl);
+    check(d.isLive && d.live && d.live.plugin_type === "HLSSource", "live HLS source");
+    check(d.live.url === "https://iptv.mock-live.test/api?channel=sport%202", "embed list resolves to the site's IPTV endpoint: " + d.live.url);
+    const h = d.live.requestModifier.headers;
+    check(h.Referer === LIVE + "/" && h.Origin === LIVE && /VLC/.test(h["User-Agent"]), "Referer/Origin/UA headers");
+    check(lastHeaders[d.live.url] && lastHeaders[d.live.url].Referer === LIVE + "/", "stream check sent the Referer");
+    check(d.video.videoSources.length === 1, "video descriptor has the stream too");
+    const rec = d.getContentRecommendations();
+    check(rec.results[0].author.name === "Mock Sports 3", "same-category channels recommended first");
+    const direct = source.getContentDetails("https://addon-bridge.invalid/live/mock-live.test/direct/watch");
+    check(direct.live.url === "https://cdn.test/live/direct.m3u8", "direct .m3u8 channel url used as is");
+});
+section("live TV: offline and missing channels", () => {
+    try { source.getContentDetails("https://addon-bridge.invalid/live/mock-live.test/dead/watch"); check(false, "should throw"); }
+    catch (e) { check(/offline/.test(e.msg || ""), "offline message: " + (e.msg || e)); }
+    try { source.getChannel("https://addon-bridge.invalid/live/nowhere.test/x"); check(false, "should throw"); }
+    catch (e) { check(/isn't loaded/.test(e.msg || ""), "missing list message: " + (e.msg || e)); }
+});
 section("search", () => {
     const r = source.search("breaking bad", "MIXED", null, {});
     const names = r.results.map(c => `${c.plugin_type === "PlatformPlaylist" ? "[show]" : "[movie]"} ${c.name}`);
     console.log("    ", names.slice(0, 6).join(" | "));
     check(r.results.some(c => c.name === "Breaking Bad" && c.plugin_type === "PlatformPlaylist"), "Breaking Bad found as show");
+    const lr = source.search("cup final", "MIXED", null, {});
+    check(lr.results[0] && lr.results[0].isLive && lr.results[0].name === "Cup Final", "search finds live programme by EPG title");
     r.results.forEach((c, i) => checkContent(c, `search[${i}]`));
 });
 section("searchChannels", () => {
