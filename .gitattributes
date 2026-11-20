@@ -1,0 +1,2 @@
+# Keep the signed script byte-for-byte identical, or Grayjay rejects the signature.
+docs/script.js -text

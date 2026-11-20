@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>__NAME__</title>
+<style>
+  :root {
+    --bg: #f5f4fa; --card: #ffffff; --fg: #1c1a27; --muted: #5d5970; --line: #dedbe8;
+    --accent: #5b32c8; --accent-fg: #ffffff; --ok: #1d7a46; --warn: #9a5b00; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #13111b; --card: #1e1b29; --fg: #ece9f6; --muted: #a39eb9; --line: #34304a;
+      --accent: #a58bff; --accent-fg: #15121f; --ok: #6fd39a; --warn: #f0b75a; --err: #ff8a80;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #13111b; --card: #1e1b29; --fg: #ece9f6; --muted: #a39eb9; --line: #34304a;
+    --accent: #a58bff; --accent-fg: #15121f; --ok: #6fd39a; --warn: #f0b75a; --err: #ff8a80;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; padding: 28px 16px 48px; }
+  header { display: flex; gap: 14px; align-items: center; margin-bottom: 8px; }
+  header img { width: 56px; height: 56px; border-radius: 14px; }
+  h1 { font-size: 22px; margin: 0; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin-top: 16px; }
+  h2 { font-size: 16px; margin: 0 0 6px; }
+  .hint { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  textarea { width: 100%; min-height: 110px; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+             background: var(--bg); color: var(--fg); font: 14px/1.4 ui-monospace, monospace; resize: vertical; }
+  ul.checks { list-style: none; padding: 0; margin: 10px 0 0; font-size: 14px; }
+  ul.checks li { padding: 3px 0; word-break: break-all; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px;
+         border-radius: 10px; border: 1px solid var(--accent); font-weight: 600; font-size: 15px;
+         text-decoration: none; cursor: pointer; background: transparent; color: var(--accent); }
+  .btn.primary { background: var(--accent); color: var(--accent-fg); }
+  .btn[aria-disabled="true"] { opacity: .45; pointer-events: none; }
+  #qrbox { display: none; margin-top: 16px; text-align: center; }
+  #qr { display: inline-block; background: #fff; padding: 12px; border-radius: 12px; }
+  ol { padding-left: 20px; margin: 0; } ol li { margin: 4px 0; }
+  .builtin { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="icon.png" alt="">
+    <div><h1>__NAME__</h1><p>__DESCRIPTION__</p></div>
+  </header>
+
+  <section class="card">
+    <h2>1. Paste your addon URLs</h2>
+    <p class="hint">Stremio addon manifest URLs, one per line (the link you'd paste into Stremio's "Add addon").
+      They go into the install link on this device only. Nothing is saved on this site.</p>
+    <textarea id="urls" spellcheck="false" autocapitalize="off" autocomplete="off"
+      placeholder="https://example.com/your-config/manifest.json"></textarea>
+    <ul class="checks" id="checks"></ul>
+    <p class="builtin">Built in: __BUILTIN_NAMES__</p>
+  </section>
+
+  <section class="card">
+    <h2>2. Install</h2>
+    <p class="hint">On the phone that has Grayjay, tap Install. From another screen, show the QR code and scan it in
+      Grayjay under Sources &rarr; +.</p>
+    <div class="actions">
+      <a class="btn primary" id="install" href="#">Install in Grayjay</a>
+      <button class="btn" id="showqr" type="button">Show QR code</button>
+      <button class="btn" id="copy" type="button">Copy link</button>
+    </div>
+    <div id="qrbox"><div id="qr"></div></div>
+  </section>
+
+  <section class="card">
+    <h2>Changing addons later</h2>
+    <ol>
+      <li>Come back to this page and paste the new list.</li>
+      <li>Install again. Grayjay replaces the plugin and keeps your settings.</li>
+    </ol>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+  const ALLOWED_HOSTS = __ALLOWED_HOSTS__;
+  const ALLOW_ANY = __ALLOW_ANY__;
+  const BUILTIN_BASES = __BUILTIN_BASES__;
+
+  const $ = (id) => document.getElementById(id);
+  let currentLink = "";
+  let qr = null;
+
+  function base(url) {
+    return url.replace(/^stremio:\/\//i, "https://").replace(/\/manifest\.json(\?.*)?$/i, "").replace(/\/+$/, "");
+  }
+
+  function b64url(text) {
+    const bytes = new TextEncoder().encode(text);
+    let bin = "";
+    bytes.forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function check(line) {
+    const url = line.replace(/^stremio:\/\//i, "https://");
+    let parsed;
+    try { parsed = new URL(url); } catch (e) { return { level: "err", text: "Not a URL" }; }
+    if (!/^https?:$/.test(parsed.protocol)) return { level: "err", text: "Must start with https://" };
+    if (BUILTIN_BASES.includes(base(url))) return { level: "warn", text: "Already built in, skipped", skip: true };
+    if (!ALLOW_ANY && !ALLOWED_HOSTS.includes(parsed.hostname)) {
+      return { level: "err", text: parsed.hostname + " isn't allowed by this build (add it to extraAllowUrls in plugin.json)" };
+    }
+    if (!/\/manifest\.json$/i.test(parsed.pathname)) return { level: "warn", text: "Doesn't end in /manifest.json; is this the right link?", url: url };
+    return { level: "ok", text: "OK", url: url };
+  }
+
+  function mask(url) {
+    // Show the host and hide the rest, since configured addon URLs often contain a personal token.
+    try { const u = new URL(url); return u.host + (u.pathname.length > 1 ? "/…" : ""); } catch (e) { return url; }
+  }
+
+  function update() {
+    const lines = $("urls").value.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+    const checks = $("checks");
+    checks.innerHTML = "";
+    const good = [];
+    let blocked = false;
+    lines.forEach((line) => {
+      const r = check(line);
+      const li = document.createElement("li");
+      li.className = r.level;
+      li.textContent = (r.level === "ok" ? "✓ " : r.level === "warn" ? "! " : "✕ ") + mask(line) + " · " + r.text;
+      checks.appendChild(li);
+      if (r.level === "err") blocked = true;
+      if (r.url && !r.skip && !good.includes(r.url)) good.push(r.url);
+    });
+
+    const configUrl = new URL("config.json", location.href);
+    configUrl.search = good.length ? "?addons=" + b64url(JSON.stringify(good)) : "";
+    currentLink = configUrl.toString();
+    const install = $("install");
+    install.href = "grayjay://plugin/" + currentLink;
+    install.setAttribute("aria-disabled", blocked ? "true" : "false");
+    $("showqr").disabled = blocked;
+    $("copy").disabled = blocked;
+    if (qr && $("qrbox").style.display === "block") drawQr();
+  }
+
+  function drawQr() {
+    $("qr").innerHTML = "";
+    qr = new QRCode($("qr"), { text: currentLink, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
+  }
+
+  $("urls").addEventListener("input", update);
+  $("showqr").addEventListener("click", () => {
+    const box = $("qrbox");
+    const show = box.style.display !== "block";
+    box.style.display = show ? "block" : "none";
+    $("showqr").textContent = show ? "Hide QR code" : "Show QR code";
+    if (show) { if (typeof QRCode === "undefined") { $("qr").textContent = "QR library didn't load."; } else drawQr(); }
+  });
+  $("copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(currentLink); $("copy").textContent = "Copied"; }
+    catch (e) { prompt("Copy this link:", currentLink); }
+    setTimeout(() => { $("copy").textContent = "Copy link"; }, 1500);
+  });
+  update();
+</script>
+</body>
+</html>

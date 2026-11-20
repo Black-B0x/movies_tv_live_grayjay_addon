@@ -1,0 +1,152 @@
+{
+  "name": "Addon Bridge",
+  "description": "Movies and shows from Stremio-protocol addons. Shows are channels, seasons are playlists.",
+  "author": "Black-B0x",
+  "authorUrl": "https://github.com/Black-B0x",
+  "repositoryUrl": "https://github.com/Black-B0x/grayjay-addon-bridge",
+  "scriptUrl": "./script.js",
+  "iconUrl": "./icon.png",
+  "id": "197e322b-ec7f-42f3-a302-dabbcaf75749",
+  "version": 1,
+  "scriptSignature": "RICJ5kIaDmNTCq/Ne8oMT2OLWw655ac8H3N5hGhGJ6H+2EpJCg3eGiVFh3iMTntcd6Sof8FYYR8xl2t1be9bVp7N6/66ulvB05kZue4unlHuaZn7/wGKGSzEJFMYun/CvWNSPGiDFTydnPndOWiiyPwVTOyA5mSzwjX2GPbEfn+sFxuaKjm4ISlobiep8bLxdAr+P1hzSb8BRkMtaZo5G1qnklmfII2UVcoBIOjK9itRTPn4yoD4uHM3AqxJPbjpBFAqMKW1trJxaCKL7WNiLs1RebRbdp8SMr9+E5k/2WkZuci0QloZHFT+QJ1axyyGkl37P4UEYtCdX1diPoHQRg==",
+  "scriptPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4Q7/KMHe7L7MqfpyBk+n9Keoq5rZvytIjeAjKozSYkri0zao68/HRcY9vMxisPXu85RpE1avTgUL1Rtm2kRs8Us1XgypD41UFXeuM7x5/sBZeyxV6Ssur6AOgFluymJh1Qp3D3A78vChVLwwJk9sNR+wj91BDWmq9/OMEeZcLdNsp8Gxpxy1zrfHjrHuPXqpr1EiSHNCatXW8kkLDW9c4HVrn1UiF7uBKKU6b23oPkJQNBnKlof57BRAIMqw8NgCr9Hz21EZuJC3KQDaRZLghebhWBa3mvKKAN8H+dYU43CqHvlbo+BmOJjsRHq/VaytYdXj26VffCKR+fEnCUu0dwIDAQAB",
+  "packages": [
+    "Http"
+  ],
+  "allowEval": false,
+  "allowUrls": [
+    "cinemeta-catalogs.strem.io",
+    "opensubtitles-v3.strem.io",
+    "pengu.uk",
+    "v3-cinemeta.strem.io"
+  ],
+  "settings": [
+    {
+      "variable": "homeHeader",
+      "name": "Home",
+      "description": "",
+      "type": "Header"
+    },
+    {
+      "variable": "homeContent",
+      "name": "Home feed shows",
+      "description": "What the Home tab pulls from your addons' catalogs.",
+      "type": "Dropdown",
+      "default": "0",
+      "options": [
+        "Movies and shows",
+        "Movies only",
+        "Shows only"
+      ]
+    },
+    {
+      "variable": "addonsHeader",
+      "name": "Addons",
+      "description": "",
+      "type": "Header"
+    },
+    {
+      "variable": "addon0",
+      "name": "Cinemeta",
+      "description": "https://v3-cinemeta.strem.io/manifest.json",
+      "type": "Boolean",
+      "default": "true"
+    },
+    {
+      "variable": "addon1",
+      "name": "OpenSubtitles",
+      "description": "https://opensubtitles-v3.strem.io/manifest.json",
+      "type": "Boolean",
+      "default": "true"
+    },
+    {
+      "variable": "streamsHeader",
+      "name": "Streams",
+      "description": "",
+      "type": "Header"
+    },
+    {
+      "variable": "maxResolution",
+      "name": "Maximum resolution",
+      "description": "Hide streams above this resolution (if that leaves nothing, all are shown).",
+      "type": "Dropdown",
+      "default": "0",
+      "options": [
+        "No limit",
+        "2160p (4K)",
+        "1080p",
+        "720p",
+        "480p"
+      ]
+    },
+    {
+      "variable": "streamOrder",
+      "name": "Stream order",
+      "description": "How the quality list is sorted.",
+      "type": "Dropdown",
+      "default": "0",
+      "options": [
+        "Highest quality first",
+        "Addon order"
+      ]
+    },
+    {
+      "variable": "showsHeader",
+      "name": "Shows",
+      "description": "",
+      "type": "Header"
+    },
+    {
+      "variable": "hideUnreleased",
+      "name": "Hide unaired episodes",
+      "description": "Leave out episodes with a future air date.",
+      "type": "Boolean",
+      "default": "true"
+    },
+    {
+      "variable": "includeSpecials",
+      "name": "Specials in latest episodes",
+      "description": "Include season 0 in a show's Videos tab and your Subscriptions feed.",
+      "type": "Boolean",
+      "default": "false"
+    },
+    {
+      "variable": "subsHeader",
+      "name": "Subtitles",
+      "description": "",
+      "type": "Header"
+    },
+    {
+      "variable": "subtitlesEnabled",
+      "name": "Load subtitles",
+      "description": "Ask subtitle addons (e.g. OpenSubtitles) for subtitles.",
+      "type": "Boolean",
+      "default": "true"
+    },
+    {
+      "variable": "subtitleLanguage",
+      "name": "Subtitle language",
+      "description": "",
+      "type": "Dropdown",
+      "default": "1",
+      "options": [
+        "All languages",
+        "English",
+        "Spanish",
+        "Portuguese",
+        "French",
+        "German",
+        "Italian",
+        "Dutch",
+        "Polish",
+        "Russian",
+        "Turkish",
+        "Arabic",
+        "Hindi",
+        "Japanese",
+        "Korean",
+        "Chinese"
+      ]
+    }
+  ]
+}

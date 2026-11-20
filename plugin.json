@@ -1,0 +1,23 @@
+{
+  "name": "Addon Bridge",
+  "description": "Movies and shows from Stremio-protocol addons. Shows are channels, seasons are playlists.",
+  "author": "Black-B0x",
+  "authorUrl": "https://github.com/Black-B0x",
+  "repositoryUrl": "https://github.com/Black-B0x/grayjay-addon-bridge",
+  "id": "197e322b-ec7f-42f3-a302-dabbcaf75749",
+  "version": 1,
+  "addons": [
+    {
+      "name": "Cinemeta",
+      "url": "https://v3-cinemeta.strem.io/manifest.json"
+    },
+    {
+      "name": "OpenSubtitles",
+      "url": "https://opensubtitles-v3.strem.io/manifest.json"
+    }
+  ],
+  "extraAllowUrls": [
+    "pengu.uk"
+  ],
+  "allowAnyHost": false
+}
