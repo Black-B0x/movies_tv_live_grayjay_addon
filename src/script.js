@@ -324,7 +324,7 @@ function fetchDetailsBundle(metaType, metaId, streamType, streamId) {
     });
 
     const duration = runtimeSeconds(meta && meta.runtime);
-    const sources = buildSources(streams, duration);
+    const sources = buildSources(streams, duration, meta && meta.name);
     if (!sources.length) {
         const torrentOnly = streams.filter(x => x.stream && x.stream.infoHash && !x.stream.url).length;
         if (torrentOnly) {
@@ -341,7 +341,7 @@ function fetchDetailsBundle(metaType, metaId, streamType, streamId) {
 
 // ---------------------------------------------------------------- streams -> Grayjay sources
 
-function buildSources(streams, duration) {
+function buildSources(streams, duration, titleName) {
     const seen = {};
     let candidates = [];
     streams.forEach((x, order) => {
@@ -351,7 +351,11 @@ function buildSources(streams, duration) {
         seen[s.url] = true;
         const hints = s.behaviorHints || {};
         const text = [s.name, s.title, s.description, hints.filename].filter(Boolean).join(" ");
-        candidates.push({ stream: s, addon: x.addon, hints: hints, height: detectHeight(text), order: order });
+        const kind = streamKind(s.url, hints.filename, text);
+        candidates.push({
+            stream: s, addon: x.addon, hints: hints, kind: kind, order: order,
+            height: detectHeight(text), compat: compatibility(text, kind)
+        });
     });
 
     const maxHeight = MAX_HEIGHT_OPTIONS[settingIndex("maxResolution", 0)] ?? Infinity;
@@ -359,35 +363,107 @@ function buildSources(streams, duration) {
     if (capped.length) candidates = capped;
 
     if (settingIndex("streamOrder", 0) === 0) {
-        candidates.sort((a, b) => (b.height - a.height) || (a.order - b.order));
+        candidates.sort((a, b) => (b.height - a.height) || (b.compat.score - a.compat.score) || (a.order - b.order));
     }
+
+    // Grayjay starts playback with a "priority" source when there is one (closest to the user's
+    // preferred quality). Flag the streams a phone is most likely to decode, so the default pick
+    // isn't a 4K HEVC/TrueHD remux. Plain files are preferred over HLS when any qualify.
+    const okFiles = candidates.some(c => c.kind === "file" && c.compat.ok);
+    const isPriority = c => c.compat.ok && (!okFiles || c.kind === "file");
+    const usedAreas = {};
 
     return candidates.map(c => {
         const s = c.stream;
-        const name = streamLabel(s, c.addon);
-        const headers = c.hints.proxyHeaders && c.hints.proxyHeaders.request;
-        const modifier = headers && Object.keys(headers).length ? { headers: headers } : null;
-        const kind = streamKind(s.url, c.hints.filename);
-        const common = { name: name, url: s.url, duration: duration };
-        if (modifier) common.requestModifier = modifier;
+        const common = {
+            name: streamLabel(s, c.addon, titleName),
+            url: s.url,
+            duration: duration,
+            priority: isPriority(c),
+            requestModifier: { headers: playbackHeaders(c.hints) }
+        };
+        if (c.kind === "hls") return new HLSSource(common);
+        if (c.kind === "dash") return new DashSource(common);
 
-        if (kind === "hls") return new HLSSource(Object.assign(common, { priority: false }));
-        if (kind === "dash") return new DashSource(common);
-        return new VideoUrlSource(Object.assign(common, {
-            width: c.height ? Math.round(c.height * 16 / 9) : 0,
-            height: c.height,
+        // With "Simplify sources" on (the default), Grayjay's quality menu keeps one source per
+        // width x height. Nudge the width so every stream stays selectable.
+        let height = c.height || 1;
+        let width = c.height ? Math.round(c.height * 16 / 9) : 1;
+        while (usedAreas[width * height]) { if (c.height) width--; else width++; }
+        usedAreas[width * height] = true;
+
+        const source = new VideoUrlSource(Object.assign(common, {
+            width: width,
+            height: height,
             container: containerOf(s.url, c.hints.filename),
-            codec: "",
-            bitrate: 0
+            codec: streamDetails(c),
+            bitrate: 0 // non-zero bitrates make Grayjay default to the smallest file
         }));
+        source.priority = common.priority; // the runtime's constructor drops it; the app reads it
+        return source;
     });
 }
 
-function streamLabel(s, addon) {
+// Grayjay's player sends a desktop Firefox user agent, which some file hosts reject
+// (e.g. HTTP 428). Send a media player one instead, unless the addon asks for its own.
+const PLAYER_USER_AGENT = "VLC/3.0.20 LibVLC/3.0.20";
+
+function playbackHeaders(hints) {
+    const headers = { "User-Agent": PLAYER_USER_AGENT };
+    const req = (hints.proxyHeaders && hints.proxyHeaders.request) || {};
+    Object.keys(req).forEach(k => {
+        if (typeof req[k] === "string" && req[k]) headers[canonicalHeader(k)] = req[k];
+    });
+    return headers;
+}
+
+function canonicalHeader(name) {
+    return String(name).trim().split("-").map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join("-");
+}
+
+// Rough guess, from the release name, at whether a phone can play a stream.
+//   ok:      plain H.264-style video and audio; eligible to be Grayjay's default pick.
+//   problem: something most phones can't decode (shown with a warning sign in the menu).
+function compatibility(text, kind) {
+    const t = (text || "").toLowerCase();
+    const tags = [];
+    let score = 0, problem = false, risky = false;
+    if (/\b(x265|h\.?265|hevc|hvc1)\b/.test(t)) { tags.push("HEVC"); score -= 1; risky = true; }
+    else if (/\bav1\b/.test(t)) { tags.push("AV1"); score -= 3; problem = true; }
+    else if (/\b(x264|h\.?264|avc1?)\b/.test(t)) { tags.push("H.264"); score += 1; }
+    if (/10.?bit/.test(t)) { tags.push("10-bit"); score -= 1; risky = true; }
+    if (/\b(dv|dovi)\b|dolby.?vision/.test(t)) { tags.push("DV"); score -= 3; problem = true; }
+    else if (/\bhdr(10)?\+?\b/.test(t)) { tags.push("HDR"); score -= 1; risky = true; }
+    if (/\bremux\b/.test(t)) { tags.push("Remux"); score -= 1; risky = true; }
+    if (/truehd/.test(t)) { tags.push("TrueHD"); score -= 3; problem = true; }
+    else if (/\bdts\b|dts.?hd/.test(t)) { tags.push("DTS"); score -= 3; problem = true; }
+    if (kind === "file" && /\bmp4\b|\.mp4\b/.test(t)) score += 1;
+    return { score: score, tags: tags, problem: problem, ok: !problem && !risky };
+}
+
+// Second line of Grayjay's quality menu: codec info, file size, and a warning for risky files.
+function streamDetails(c) {
+    const parts = c.compat.tags.slice();
+    const size = Number(c.hints.videoSize);
+    if (size > 0) parts.push(humanBytes(size));
+    const text = parts.join(" · ");
+    return c.compat.problem ? "⚠ " + text : text;
+}
+
+function humanBytes(n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + " GB";
+    return Math.round(n / 1e6) + " MB";
+}
+
+function streamLabel(s, addon, titleName) {
     const name = oneLine(s.name) || addon.name || "Stream";
-    const detail = oneLine(firstLine(s.description || s.title || ""));
+    const title = (titleName || "").toLowerCase();
+    // Skip description lines that only repeat the title or the stream name.
+    const detail = String(s.description || s.title || "").split("\n")
+        .map(oneLine)
+        .find(l => l && !(title && l.toLowerCase().indexOf(title) >= 0) && name.indexOf(l) < 0);
     let label = name;
-    if (detail && label.indexOf(detail) < 0) label += " · " + detail;
+    if (detail) label += " · " + detail;
     return label.length > 100 ? label.substring(0, 97) + "..." : label;
 }
 
@@ -404,10 +480,16 @@ function detectHeight(text) {
     return 0;
 }
 
-function streamKind(url, filename) {
-    const path = (url.split(/[?#]/)[0] + " " + (filename || "")).toLowerCase();
-    if (/\.m3u8\b/.test(path) || /[?&](format|type|ext)=m3u8/i.test(url)) return "hls";
-    if (/\.mpd\b/.test(path) || /[?&](format|type|ext)=mpd/i.test(url)) return "dash";
+function streamKind(url, filename, text) {
+    const path = url.split(/[?#]/)[0].toLowerCase();
+    const file = String(filename || "").split("|")[0].toLowerCase();
+    const both = path + " " + file;
+    if (/\.m3u8\b/.test(both) || /[?&](format|type|ext)=m3u8/i.test(url)) return "hls";
+    if (/\.mpd\b/.test(both) || /[?&](format|type|ext)=mpd/i.test(url)) return "dash";
+    if (/\.(mkv|mp4|m4v|webm|avi|mov|ts)\b/.test(both)) return "file";
+    // Playlists served without an extension: trust the addon's own description ("720p • HLS").
+    if (/\/hls\//.test(path) || /(^|[^a-z0-9])hls([^a-z0-9]|$)/i.test(text || "")) return "hls";
+    if (/\/dash\//.test(path) || /(^|[^a-z0-9])(mpeg-)?dash([^a-z0-9]|$)/i.test(text || "")) return "dash";
     return "file";
 }
 

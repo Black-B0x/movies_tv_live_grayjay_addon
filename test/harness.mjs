@@ -182,6 +182,12 @@ section("getContentDetails (episode)", () => {
     check(srcs[0].height === 2160 && srcs[0].requestModifier && srcs[0].requestModifier.headers.Referer, "4K first with Referer");
     check(srcs.some(s => s.plugin_type === "HLSSource"), "has HLS");
     check(srcs.some(s => s.container === "video/x-matroska"), "mkv container");
+    check(srcs.every(s => s.requestModifier && /VLC/.test(s.requestModifier.headers["User-Agent"])), "player user agent on every source");
+    const areas = srcs.filter(s => s.plugin_type === "VideoUrlSource").map(s => s.width * s.height);
+    check(new Set(areas).size === areas.length, "unique width x height so Grayjay lists every file");
+    const kind = (url, fn, text) => vm.runInContext(`streamKind(${JSON.stringify(url)}, ${JSON.stringify(fn)}, ${JSON.stringify(text)})`, ctx);
+    check(kind("https://x/direct/abc?sig=1", "720pHLS|^|tags", "720p • HLS • 1.9 Mbps") === "hls", "extensionless HLS detected");
+    check(kind("https://x/direct/abc", "Movie.1080p.mkv", "HLS mirror") === "file", "file extension wins over text");
     check(d.subtitles.length > 0 && d.subtitles.every(s => s.url && s.format && s.name), `subtitles (${d.subtitles.length})`);
     console.log("    subs:", d.subtitles.map(s => `${s.name}[${s.format}]`).join(", "));
     check(d.description.includes("Season 1"), "episode description");

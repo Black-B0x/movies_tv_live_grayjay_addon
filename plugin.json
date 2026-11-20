@@ -5,7 +5,7 @@
   "authorUrl": "https://github.com/Black-B0x",
   "repositoryUrl": "https://github.com/Black-B0x/grayjay-addon-bridge",
   "id": "197e322b-ec7f-42f3-a302-dabbcaf75749",
-  "version": 1,
+  "version": 2,
   "addons": [
     {
       "name": "Cinemeta",

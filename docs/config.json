@@ -7,8 +7,8 @@
   "scriptUrl": "./script.js",
   "iconUrl": "./icon.png",
   "id": "197e322b-ec7f-42f3-a302-dabbcaf75749",
-  "version": 1,
-  "scriptSignature": "RICJ5kIaDmNTCq/Ne8oMT2OLWw655ac8H3N5hGhGJ6H+2EpJCg3eGiVFh3iMTntcd6Sof8FYYR8xl2t1be9bVp7N6/66ulvB05kZue4unlHuaZn7/wGKGSzEJFMYun/CvWNSPGiDFTydnPndOWiiyPwVTOyA5mSzwjX2GPbEfn+sFxuaKjm4ISlobiep8bLxdAr+P1hzSb8BRkMtaZo5G1qnklmfII2UVcoBIOjK9itRTPn4yoD4uHM3AqxJPbjpBFAqMKW1trJxaCKL7WNiLs1RebRbdp8SMr9+E5k/2WkZuci0QloZHFT+QJ1axyyGkl37P4UEYtCdX1diPoHQRg==",
+  "version": 2,
+  "scriptSignature": "VnPWZicOfchL4Rm6Jo9tLYH2xQSJtT8b4A1VwR6aFlM2zvpkBGiHaf/rfDF1v6Yb9HuWQMEJXbS9fumye5K9QuOHgFzW7BQeLFSwAbX0+HZgSUR3H9mLtXneEC337xxaYUvr3nLE2JFh4olIp7aMHxxQdLPFCOKYWik2nPE1JzbJPlKJWrggkfOurgscrdkLkTufxZ2RnA1VphNW/zD0yQQXSt7PL3PYBEOYgukMS04rwP58seURFYd4qaWrJujuWZ+Wwv7xbSiLrYWUc/7BSmfqH6uXn9xs8bqendY2t2DM9dOFRwwkJn6oEh5S/1mMQfy88ZdRqLZN0YdSxkkPIA==",
   "scriptPublicKey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4Q7/KMHe7L7MqfpyBk+n9Keoq5rZvytIjeAjKozSYkri0zao68/HRcY9vMxisPXu85RpE1avTgUL1Rtm2kRs8Us1XgypD41UFXeuM7x5/sBZeyxV6Ssur6AOgFluymJh1Qp3D3A78vChVLwwJk9sNR+wj91BDWmq9/OMEeZcLdNsp8Gxpxy1zrfHjrHuPXqpr1EiSHNCatXW8kkLDW9c4HVrn1UiF7uBKKU6b23oPkJQNBnKlof57BRAIMqw8NgCr9Hz21EZuJC3KQDaRZLghebhWBa3mvKKAN8H+dYU43CqHvlbo+BmOJjsRHq/VaytYdXj26VffCKR+fEnCUu0dwIDAQAB",
   "packages": [
     "Http"
